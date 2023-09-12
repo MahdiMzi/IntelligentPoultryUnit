@@ -5,8 +5,22 @@
 #include <Ticker.h>
 #include <DHT.h>
 
+#define MaximumTemperature 30.0
+#define MinimumTemperature 25.0
+#define TemperatureThreshold 2.0
 #define BAUD_RATE 9600
 String my_username = "admin", my_pass = "admin";
+#define relayTimeElapsed 32
+#define relayEggIncubator 32
+#define relayLightStatus 33
+#define relayWateringTime 25
+#define relayFeederMovement 25
+#define relayHeatingSystemLED 26
+#define relayCoolingSystemLED 27
+#define relayVentilation 14
+#define relayBurglarAlarmLED 12
+#define relayBurglarAlarmBuzzer 13
+void initProgram();
 
 // WiFi
 #define AP_SSID "ESP"
@@ -182,6 +196,7 @@ const String url_time_elapsed = "/time_elapsed",
              url_watering_time = "/watering_time",
              url_feeder_movement = "/feeder_movement",
              url_pir = "/alarm_status";
+
 const String check_url1 = "url1",
              check_url2 = "url2",
              check_url3 = "url3",
@@ -262,9 +277,11 @@ void writeEEPROM(const byte &_startIdx, const String &_str);
 
 // PIR Motion Sensor
 #define pirSensor_pin 19
-#define numberMotionChecks 20
-#define pirSensor_ms 100
-int sumMovement = 0, cntMovement = 0;
+#define numberMotionChecks 50
+#define pirSensor_ms 200
+#define numberWarning 1000 / pirSensor_ms
+int sumMovement = 0, cntMovement = 0, cntWarning = 0;
+bool burglarAlarm = false;
 bool motionDetect()
 {
     return digitalRead(pirSensor_pin);
@@ -291,77 +308,77 @@ void timerPirHandler();
 void timerHandler();
 
 //----------------------------------------------------------------------------------------------------------------------------------
-
 void setup()
+{
+    Serial.begin(BAUD_RATE);
+    Serial.println();
+    initEEPROM();
+    // resetFactory();
+    initAP();
+    initWebServer();
+    if (currentState == pair)
+    {
+        initProgram();
+    }
+}
+void loop()
+{
+    server.handleClient();
+}
+//----------------------------------------------------------------------------------------------------------------------------------
+void initProgram()
 {
     pinMode(ultrasonicSensor_trigger_pin, OUTPUT); // configure the trigger_pin(D9) as an Output
     pinMode(ultrasonicSensor_echo_pin, INPUT);     // configure the Echo_pin(D11) as an Input
     pinMode(pirSensor_pin, INPUT);
     pinMode(MQ5Sensor_A0_pin, INPUT);
-    Serial.begin(BAUD_RATE);
-
-    initEEPROM();
-    // resetFactory();
-    initAP();
-    initWebServer();
     dht.begin();
 
-    if (currentState == pair)
+    pinMode(relayTimeElapsed, OUTPUT);
+    // pinMode(relayEggIncubator, OUTPUT);
+    pinMode(relayLightStatus, OUTPUT);
+    pinMode(relayWateringTime, OUTPUT);
+    // pinMode(relayFeederMovement, OUTPUT);
+    pinMode(relayHeatingSystemLED, OUTPUT);
+    pinMode(relayCoolingSystemLED, OUTPUT);
+    pinMode(relayVentilation, OUTPUT);
+    pinMode(relayBurglarAlarmLED, OUTPUT);
+    pinMode(relayBurglarAlarmBuzzer, OUTPUT);
+
+    delay(500);
+    // Serial.println("Wait for 30 sec warmup");
+    delay(30000); /* Set the warmup delay wich is 30 Sec */
+    // Serial.println("Warmup Complete");
+    for (int i = 0; i < 30; i++)
     {
-        delay(500);
-        Serial.println("Wait for 30 sec warmup");
-        delay(30000); /* Set the warmup delay wich is 30 Sec */
-        Serial.println("Warmup Complete");
-        for (int i = 0; i < 30; i++)
-        {
-            mVolt += get_mVolt(MQ5Sensor_A0_pin);
-        }
-        mVolt = mVolt / 30.0; /* Get the volatage in mV for 30 Samples */
-        Serial.print("Voltage at A0 Pin = ");
-        Serial.print(mVolt);
-        Serial.println("mVolt");
-        Serial.print("Rs = ");
-        Serial.println(calculateRS(mVolt));
-        Ro = calculateRS(mVolt) / Ro_clean_air_factor;
-        Serial.print("Ro = ");
-        Serial.println(Ro);
-        Serial.println(" ");
-        mVolt = 0.0;
-
-        timer.attach_ms(samplingRate_ms, timerHandler);
+        mVolt += get_mVolt(MQ5Sensor_A0_pin);
     }
+    mVolt = mVolt / 30.0; /* Get the volatage in mV for 30 Samples */
+    // Serial.print("Voltage at A0 Pin = ");
+    // Serial.print(mVolt);
+    // Serial.println("mVolt");
+    // Serial.print("Rs = ");
+    // Serial.println(calculateRS(mVolt));
+    Ro = calculateRS(mVolt) / Ro_clean_air_factor;
+    // Serial.print("Ro = ");
+    // Serial.println(Ro);
+    // Serial.println(" ");
+    mVolt = 0.0;
 
-    // pinMode(32, OUTPUT);
-    // pinMode(LED_BUILTIN, OUTPUT);
+    timer.attach_ms(samplingRate_ms, timerHandler);
+
+    digitalWrite(relayEggIncubator, LOW);
+    // digitalWrite(relayTimeElapsed, LOW);
+    digitalWrite(relayLightStatus, LOW);
+    digitalWrite(relayFeederMovement, LOW);
+    // digitalWrite(relayWateringTime, LOW);
+    digitalWrite(relayHeatingSystemLED, LOW);
+    digitalWrite(relayCoolingSystemLED, LOW);
+    digitalWrite(relayVentilation, LOW);
+    digitalWrite(relayBurglarAlarmLED, LOW);
+    digitalWrite(relayBurglarAlarmBuzzer, LOW);
 }
-
-void loop()
-{
-    server.handleClient();
-
-    // digitalWrite(32, LOW);
-    // digitalWrite(LED_BUILTIN, LOW);
-    // delay(1000);
-    // digitalWrite(32, HIGH);
-    // digitalWrite(LED_BUILTIN, HIGH);
-    // delay(1000);
-
-    // int sensor_Aout = analogRead(MQ5Sensor_A0_pin); /*Analog value read function*/
-    // Serial.print("Gas Sensor: ");
-    // Serial.print(sensor_Aout); /*Read value printed*/
-    // Serial.print("\t");
-    // Serial.print("\t");
-    // if (sensor_Aout > 1800)
-    // { /*if condition with threshold 1800*/
-    //     Serial.println("Gas");
-    // }
-    // else
-    // {
-    //     Serial.println("No Gas");
-    // }
-    delay(2000);
-}
-
+//----------------------------------------------------------------------------------------------------------------------------------
 void initAP()
 {
     WiFi.mode(WIFI_AP);
@@ -565,16 +582,6 @@ void handleCheck()
            temp_pass = server.arg("password"),
            temp_number = server.arg("number");
 
-    ///
-    Serial.print("key: ");
-    Serial.println(key);
-    Serial.print("temp_username: ");
-    Serial.println(temp_username);
-    Serial.print("temp_pass: ");
-    Serial.println(temp_pass);
-    Serial.print("temp_number: ");
-    Serial.println(temp_number);
-
     if (key == "autha" && temp_username == my_username && temp_pass == my_pass)
     {
         server.send(200);
@@ -750,44 +757,31 @@ void initEEPROM()
             my_pass = readEEPROM(password_idx);
             EEPROM.get(eeprom_data_idx, e_data);
 
-            ///
-            Serial.print("FCD: ");
-            Serial.println(e_data.FCD);
-            Serial.print("CE: ");
-            Serial.println(e_data.CE);
-            Serial.print("OFLED: ");
-            Serial.println(e_data.OFLED);
-            Serial.print("OFW: ");
-            Serial.println(e_data.OFW);
-            Serial.print("OFR: ");
-            Serial.println(e_data.OFR);
-            Serial.print("PIR: ");
-            Serial.println(e_data.PIR);
             if (e_data.FCD != 0)
             {
+                timerTimeElapsed.attach(e_data.FCD, timerTimeElapsedHandler);
             }
             if (e_data.CE != 0)
             {
+                timerEggIncubator.attach(e_data.CE, timerEggIncubatorHandler);
             }
             if (e_data.OFLED != 0)
             {
+                timerLightStatus.attach(e_data.OFLED, timerLightStatusHandler);
+            }
+            if (e_data.OFW != 0)
+            {
+                timerWateringTime.attach(e_data.OFW, timerWateringTimeHandler);
             }
             if (e_data.OFR != 0)
             {
+                timerFeederMovement.attach(e_data.OFR, timerFeederMovementHandler);
             }
             if (e_data.PIR == pair)
             {
                 timerPir.attach_ms(pirSensor_ms, timerPirHandler);
             }
         }
-
-        ///
-        Serial.print("currentState: ");
-        Serial.println(currentState);
-        Serial.print("my_username: ");
-        Serial.println(my_username);
-        Serial.print("my_pass: ");
-        Serial.println(my_pass);
     }
     else
     {
@@ -797,7 +791,6 @@ void initEEPROM()
         EEPROM.put(eeprom_data_idx, e_data);
         EEPROM.commit();
     }
-    Serial.println("initEEPROM");
 }
 void resetFactory()
 {
@@ -831,33 +824,58 @@ void writeEEPROM(const byte &_startIdx, const String &_str)
 //----------------------------------------------------------------------------------------------------------------------------------
 void timerTimeElapsedHandler()
 {
+    digitalWrite(relayTimeElapsed, !digitalRead(relayTimeElapsed));
 }
 void timerEggIncubatorHandler()
 {
+    digitalWrite(relayEggIncubator, !digitalRead(relayEggIncubator));
 }
 void timerLightStatusHandler()
 {
+    digitalWrite(relayLightStatus, !digitalRead(relayLightStatus));
 }
 void timerWateringTimeHandler()
 {
+    digitalWrite(relayWateringTime, !digitalRead(relayWateringTime));
 }
 void timerFeederMovementHandler()
 {
+    digitalWrite(relayFeederMovement, !digitalRead(relayFeederMovement));
 }
 void timerPirHandler()
 {
-    sumMovement += motionDetect();
-    if (cntMovement > numberMotionChecks)
+    if (burglarAlarm == false)
     {
-        if (sumMovement >= 0.7 * numberMotionChecks)
+        sumMovement += motionDetect();
+        if (cntMovement >= numberMotionChecks - 1)
         {
-            Serial.println("Dozd!");
+            if (sumMovement >= 0.8 * numberMotionChecks)
+            {
+                Serial.println("Dozd!");
+                digitalWrite(relayBurglarAlarmLED, HIGH);
+                burglarAlarm = true;
+                cntWarning = 0;
+            }
+            sumMovement = 0;
+            cntMovement = 0;
         }
-        Serial.println(sumMovement);
-        sumMovement = 0;
-        cntMovement = 0;
+        cntMovement++;
     }
-    cntMovement++;
+    else if (burglarAlarm == true)
+    {
+        if (cntWarning >= (numberWarning * 11) - 1)
+        {
+            digitalWrite(relayBurglarAlarmBuzzer, LOW);
+            digitalWrite(relayBurglarAlarmLED, LOW);
+            cntMovement = 0;
+            burglarAlarm = false;
+        }
+        else if (cntWarning % numberWarning == 0)
+        {
+            digitalWrite(relayBurglarAlarmBuzzer, !digitalRead(relayBurglarAlarmBuzzer));
+        }
+        cntWarning++;
+    }
 }
 void timerHandler()
 {
@@ -882,15 +900,32 @@ void timerHandler()
     {
         calculateTemperatureHumidity();
         calculateDistance();
+        ///
+        byte coolingSystemLED = digitalRead(relayCoolingSystemLED),
+             heatingSystemLED = digitalRead(relayHeatingSystemLED);
+        if (heatIndex >= MaximumTemperature && coolingSystemLED != HIGH)
+        {
+            digitalWrite(relayCoolingSystemLED, !coolingSystemLED);
+            digitalWrite(relayVentilation, HIGH);
+        }
+        else if (coolingSystemLED == HIGH && heatIndex <= MaximumTemperature - TemperatureThreshold)
+        {
+            digitalWrite(relayCoolingSystemLED, !coolingSystemLED);
+            digitalWrite(relayVentilation, LOW);
+        }
+        if (heatIndex <= MinimumTemperature && heatingSystemLED != HIGH)
+        {
+            digitalWrite(relayHeatingSystemLED, !heatingSystemLED);
+            digitalWrite(relayVentilation, HIGH);
+        }
+        else if (heatingSystemLED == HIGH && heatIndex >= MinimumTemperature - TemperatureThreshold)
+        {
+            digitalWrite(relayHeatingSystemLED, !heatingSystemLED);
+            digitalWrite(relayVentilation, LOW);
+        }
         counterDHT11 = 0;
     }
     counterMQ5++;
     counterDHT11++;
 }
-//----------------------------------------------------------------------------------------------------------------------------------
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
-//----------------------------------------------------------------------------------------------------------------------------------
-
 //----------------------------------------------------------------------------------------------------------------------------------
