@@ -19,7 +19,7 @@ String my_username = "admin", my_pass = "admin";
 #define relayCoolingSystemLED 27
 #define relayVentilation 14
 #define relayBurglarAlarmLED 12
-#define relayBurglarAlarmBuzzer 13
+#define relayBurglarAlarmBuzzer 18
 void initProgram();
 
 // WiFi
@@ -223,6 +223,8 @@ void handleNotFound();
 
 // MQ5 LPG Gas Sensor
 #define MQ5Sensor_A0_pin 36
+#define LPG_ppm_MaxThreshold 30
+#define LPG_ppm_MinThreshold 10
 float Referance_V = 3300.0;
 float RL = 1.0;
 float Ro = 10.0;
@@ -277,7 +279,7 @@ void writeEEPROM(const byte &_startIdx, const String &_str);
 
 // PIR Motion Sensor
 #define pirSensor_pin 19
-#define numberMotionChecks 50
+#define numberMotionChecks 25
 #define pirSensor_ms 200
 #define numberWarning 1000 / pirSensor_ms
 int sumMovement = 0, cntMovement = 0, cntWarning = 0;
@@ -291,19 +293,18 @@ bool motionDetect()
 #define samplingRate_ms 5
 #define samplingRate_thershold 500
 #define DHT11_thershold 300 / samplingRate_ms
-int counterMQ5 = 0, counterDHT11 = 0;
-Ticker timerTimeElapsed,
-    timerEggIncubator,
-    timerLightStatus,
-    timerWateringTime,
-    timerFeederMovement,
+#define every_1S 1000 / samplingRate_ms
+int counterMQ5 = 0, counterDHT11 = 0, cntEvery_1S = 0;
+struct myTimer
+{
+    bool flag = false;
+    int cnt = 0;
+} timerTimeElapsed, timerEggIncubator, timerLightStatus, timerWateringTime, timerFeederMovement;
+bool flagPPM = false, flagHeatIndex = false;
+Ticker
     timerPir,
     timer;
-void timerTimeElapsedHandler();
-void timerEggIncubatorHandler();
-void timerLightStatusHandler();
-void timerWateringTimeHandler();
-void timerFeederMovementHandler();
+void myTimerHandler(const int &timer_s, const int &relay_pin, int &cnt);
 void timerPirHandler();
 void timerHandler();
 
@@ -421,7 +422,6 @@ String dashboard_html()
     html += "<h2>LPG ppm:</h2><p>" + String(LPG_ppm) + " PPM</p>";
     html += "<h2>Food Container Level:</h2><p>" + String(ultrasonicSensor_distance) + "cm</p><br><br><a href=\"reset\">Reset Factory</a></body></html>";
     return html;
-    ///
 }
 String timer_form_html(const String &check_url)
 {
@@ -483,15 +483,11 @@ void handleConfirm()
         server.send(404, "text/plain", "Error 404 - Not Found!");
     }
 }
-///
 void handleTimeElapsed()
 {
     if (currentState == pair)
     {
         String timer_form_html2 = "";
-        // formData.append('key', 'authb');
-        // timer_form_html2 += "formData.append('key', '" + check_url1 + "');";
-        // timer_form_html2 += "var params = 'key=" + check_url1 + "' + 'number=' + encodeURIComponent(number);";
         server.send(200, "text/html", timer_form_html(check_url1));
     }
     else if (currentState == notPair)
@@ -504,10 +500,6 @@ void handleEggIncubator()
     if (currentState == pair)
     {
         String timer_form_html2 = "";
-        // formData.append('key', 'authb');
-        // timer_form_html2 += "formData.append('key', '" + check_url2 + "');";
-        // timer_form_html2 += "var params = 'key=" + check_url2 + "' + 'number=' + encodeURIComponent(number);";
-        // server.send(200, "text/html", timer_form_html1 + timer_form_html2 + timer_form_html3);
         server.send(200, "text/html", timer_form_html(check_url2));
     }
     else if (currentState == notPair)
@@ -520,10 +512,6 @@ void handleLightStatus()
     if (currentState == pair)
     {
         String timer_form_html2 = "";
-        // formData.append('key', 'authb');
-        // timer_form_html2 += "formData.append('key', '" + check_url3 + "');";
-        // timer_form_html2 += "var params = 'key=" + check_url3 + "' + 'number=' + encodeURIComponent(number);";
-        // server.send(200, "text/html", timer_form_html1 + timer_form_html2 + timer_form_html3);
         server.send(200, "text/html", timer_form_html(check_url3));
     }
     else if (currentState == notPair)
@@ -536,10 +524,6 @@ void handleWateringTime()
     if (currentState == pair)
     {
         String timer_form_html2 = "";
-        // formData.append('key', 'authb');
-        // timer_form_html2 += "formData.append('key', '" + check_url4 + "');";
-        // timer_form_html2 += "var params = 'key=" + check_url4 + "' + 'number=' + encodeURIComponent(number);";
-        // server.send(200, "text/html", timer_form_html1 + timer_form_html2 + timer_form_html3);
         server.send(200, "text/html", timer_form_html(check_url4));
     }
     else if (currentState == notPair)
@@ -552,10 +536,6 @@ void handleFeederMovement()
     if (currentState == pair)
     {
         String timer_form_html2 = "";
-        // formData.append('key', 'authb');
-        // timer_form_html2 += "formData.append('key', '" + check_url5 + "');";
-        // timer_form_html2 += "var params = 'key=" + check_url5 + "' + 'number=' + encodeURIComponent(number);";
-        // server.send(200, "text/html", timer_form_html1 + timer_form_html2 + timer_form_html3);
         server.send(200, "text/html", timer_form_html(check_url5));
     }
     else if (currentState == notPair)
@@ -563,7 +543,6 @@ void handleFeederMovement()
         server.send(404, "text/plain", "Error 404 - Not Found!");
     }
 }
-///
 void handlePir()
 {
     if (currentState == pair)
@@ -600,8 +579,17 @@ void handleCheck()
         e_data.FCD = temp_number.toInt();
         EEPROM.put(eeprom_data_idx, e_data);
         EEPROM.commit();
-        timerTimeElapsed.detach();
-        timerTimeElapsed.attach(e_data.FCD, timerTimeElapsedHandler);
+        if (e_data.FCD != 0)
+        {
+            timerTimeElapsed.flag = true;
+            timerTimeElapsed.cnt = 0;
+        }
+        else
+        {
+            timerTimeElapsed.flag = false;
+            timerTimeElapsed.cnt = 0;
+            digitalWrite(relayTimeElapsed, LOW);
+        }
         server.send(200);
         return;
     }
@@ -610,8 +598,17 @@ void handleCheck()
         e_data.CE = temp_number.toInt();
         EEPROM.put(eeprom_data_idx, e_data);
         EEPROM.commit();
-        timerEggIncubator.detach();
-        timerEggIncubator.attach(e_data.CE, timerEggIncubatorHandler);
+        if (e_data.CE != 0)
+        {
+            timerEggIncubator.flag = true;
+            timerEggIncubator.cnt = 0;
+        }
+        else
+        {
+            timerEggIncubator.flag = false;
+            timerEggIncubator.cnt = 0;
+            digitalWrite(relayEggIncubator, LOW);
+        }
         server.send(200);
         return;
     }
@@ -620,8 +617,17 @@ void handleCheck()
         e_data.OFLED = temp_number.toInt();
         EEPROM.put(eeprom_data_idx, e_data);
         EEPROM.commit();
-        timerLightStatus.detach();
-        timerLightStatus.attach(e_data.OFLED, timerLightStatusHandler);
+        if (e_data.OFLED != 0)
+        {
+            timerLightStatus.flag = true;
+            timerLightStatus.cnt = 0;
+        }
+        else
+        {
+            timerLightStatus.flag = false;
+            timerLightStatus.cnt = 0;
+            digitalWrite(relayLightStatus, LOW);
+        }
         server.send(200);
         return;
     }
@@ -630,8 +636,17 @@ void handleCheck()
         e_data.OFW = temp_number.toInt();
         EEPROM.put(eeprom_data_idx, e_data);
         EEPROM.commit();
-        timerWateringTime.detach();
-        timerWateringTime.attach(e_data.OFW, timerWateringTimeHandler);
+        if (e_data.OFW != 0)
+        {
+            timerWateringTime.flag = true;
+            timerWateringTime.cnt = 0;
+        }
+        else
+        {
+            timerWateringTime.flag = false;
+            timerWateringTime.cnt = 0;
+            digitalWrite(relayWateringTime, LOW);
+        }
         server.send(200);
         return;
     }
@@ -640,12 +655,20 @@ void handleCheck()
         e_data.OFR = temp_number.toInt();
         EEPROM.put(eeprom_data_idx, e_data);
         EEPROM.commit();
-        timerFeederMovement.detach();
-        timerFeederMovement.attach(e_data.OFR, timerFeederMovementHandler);
+        if (e_data.OFR != 0)
+        {
+            timerFeederMovement.flag = true;
+            timerFeederMovement.cnt = 0;
+        }
+        else
+        {
+            timerFeederMovement.flag = false;
+            timerFeederMovement.cnt = 0;
+            digitalWrite(relayFeederMovement, LOW);
+        }
         server.send(200);
         return;
     }
-    ///
     else if (key == check_url6 && temp_number != "")
     {
         if (temp_number == "1")
@@ -663,6 +686,8 @@ void handleCheck()
             e_data.PIR = notPair;
             EEPROM.put(eeprom_data_idx, e_data);
             EEPROM.commit();
+            digitalWrite(relayBurglarAlarmBuzzer, LOW);
+            digitalWrite(relayBurglarAlarmLED, LOW);
             timerPir.detach();
             server.send(200);
             return;
@@ -743,10 +768,6 @@ void calculateDistance()
 void initEEPROM()
 {
     EEPROM.begin(EEPROM_SIZE);
-
-    // EEPROM.write(magic_idx, 0x03);
-    // EEPROM.commit();
-
     if (EEPROM.read(magic_idx) == magicVal)
     {
         currentState = EEPROM.read(currentState_idx);
@@ -759,23 +780,23 @@ void initEEPROM()
 
             if (e_data.FCD != 0)
             {
-                timerTimeElapsed.attach(e_data.FCD, timerTimeElapsedHandler);
+                timerTimeElapsed.flag = true;
             }
             if (e_data.CE != 0)
             {
-                timerEggIncubator.attach(e_data.CE, timerEggIncubatorHandler);
+                timerEggIncubator.flag = true;
             }
             if (e_data.OFLED != 0)
             {
-                timerLightStatus.attach(e_data.OFLED, timerLightStatusHandler);
+                timerLightStatus.flag = true;
             }
             if (e_data.OFW != 0)
             {
-                timerWateringTime.attach(e_data.OFW, timerWateringTimeHandler);
+                timerWateringTime.flag = true;
             }
             if (e_data.OFR != 0)
             {
-                timerFeederMovement.attach(e_data.OFR, timerFeederMovementHandler);
+                timerFeederMovement.flag = true;
             }
             if (e_data.PIR == pair)
             {
@@ -822,32 +843,21 @@ void writeEEPROM(const byte &_startIdx, const String &_str)
     EEPROM.commit();
 }
 //----------------------------------------------------------------------------------------------------------------------------------
-void timerTimeElapsedHandler()
+void myTimerHandler(const int &timer_s, const int &relay_pin, int &cnt)
 {
-    digitalWrite(relayTimeElapsed, !digitalRead(relayTimeElapsed));
-}
-void timerEggIncubatorHandler()
-{
-    digitalWrite(relayEggIncubator, !digitalRead(relayEggIncubator));
-}
-void timerLightStatusHandler()
-{
-    digitalWrite(relayLightStatus, !digitalRead(relayLightStatus));
-}
-void timerWateringTimeHandler()
-{
-    digitalWrite(relayWateringTime, !digitalRead(relayWateringTime));
-}
-void timerFeederMovementHandler()
-{
-    digitalWrite(relayFeederMovement, !digitalRead(relayFeederMovement));
+    if (cnt > timer_s)
+    {
+        digitalWrite(relay_pin, !digitalRead(relay_pin));
+        cnt = 0;
+    }
+    cnt++;
 }
 void timerPirHandler()
 {
     if (burglarAlarm == false)
     {
         sumMovement += motionDetect();
-        if (cntMovement >= numberMotionChecks - 1)
+        if (cntMovement > numberMotionChecks)
         {
             if (sumMovement >= 0.8 * numberMotionChecks)
             {
@@ -863,7 +873,7 @@ void timerPirHandler()
     }
     else if (burglarAlarm == true)
     {
-        if (cntWarning >= (numberWarning * 11) - 1)
+        if (cntWarning > (numberWarning * 11))
         {
             digitalWrite(relayBurglarAlarmBuzzer, LOW);
             digitalWrite(relayBurglarAlarmLED, LOW);
@@ -879,6 +889,31 @@ void timerPirHandler()
 }
 void timerHandler()
 {
+    if (cntEvery_1S > every_1S)
+    {
+        if (timerTimeElapsed.flag == true)
+        {
+            myTimerHandler(e_data.FCD, relayTimeElapsed, timerTimeElapsed.cnt);
+        }
+        if (timerEggIncubator.flag == true)
+        {
+            myTimerHandler(e_data.CE, relayEggIncubator, timerEggIncubator.cnt);
+        }
+        if (timerLightStatus.flag == true)
+        {
+            myTimerHandler(e_data.OFLED, relayLightStatus, timerLightStatus.cnt);
+        }
+        if (timerWateringTime.flag == true)
+        {
+            myTimerHandler(e_data.OFW, relayWateringTime, timerWateringTime.cnt);
+        }
+        if (timerFeederMovement.flag == true)
+        {
+            myTimerHandler(e_data.OFR, relayFeederMovement, timerFeederMovement.cnt);
+        }
+        cntEvery_1S = 0;
+    }
+    cntEvery_1S++;
     // 10ms * 500 = 5000
     // for (int i = 0; i < 500; i++) // 500
     // {
@@ -896,33 +931,50 @@ void timerHandler()
         mVolt = 0.0; /* Set the mVolt variable to 0 */
         counterMQ5 = 0;
     }
-    if (counterDHT11 >= DHT11_thershold - 1)
+    if (counterDHT11 > DHT11_thershold)
     {
+        byte ventilationSystem = digitalRead(relayVentilation);
+        if (ventilationSystem == LOW && LPG_ppm >= LPG_ppm_MaxThreshold)
+        {
+            flagPPM = true;
+        }
+        else if (ventilationSystem == HIGH && LPG_ppm <= LPG_ppm_MinThreshold)
+        {
+            flagPPM = false;
+        }
         calculateTemperatureHumidity();
         calculateDistance();
-        ///
+
         byte coolingSystemLED = digitalRead(relayCoolingSystemLED),
              heatingSystemLED = digitalRead(relayHeatingSystemLED);
         if (heatIndex >= MaximumTemperature && coolingSystemLED != HIGH)
         {
             digitalWrite(relayCoolingSystemLED, !coolingSystemLED);
-            digitalWrite(relayVentilation, HIGH);
+            flagHeatIndex = true;
+            Serial.println("if (heatIndex >= MaximumTemperature && coolingSystemLED != HIGH)");
         }
         else if (coolingSystemLED == HIGH && heatIndex <= MaximumTemperature - TemperatureThreshold)
         {
             digitalWrite(relayCoolingSystemLED, !coolingSystemLED);
-            digitalWrite(relayVentilation, LOW);
+            flagHeatIndex = false;
+            Serial.println("else if (coolingSystemLED == HIGH && heatIndex <= MaximumTemperature - TemperatureThreshold)");
         }
         if (heatIndex <= MinimumTemperature && heatingSystemLED != HIGH)
         {
             digitalWrite(relayHeatingSystemLED, !heatingSystemLED);
-            digitalWrite(relayVentilation, HIGH);
+            flagHeatIndex = true;
+            Serial.println("if (heatIndex <= MinimumTemperature && heatingSystemLED != HIGH)");
         }
-        else if (heatingSystemLED == HIGH && heatIndex >= MinimumTemperature - TemperatureThreshold)
+        else if (heatingSystemLED == HIGH && heatIndex >= MinimumTemperature + TemperatureThreshold)
         {
             digitalWrite(relayHeatingSystemLED, !heatingSystemLED);
-            digitalWrite(relayVentilation, LOW);
+            flagHeatIndex = false;
+            Serial.println("else if (heatingSystemLED == HIGH && heatIndex >= MinimumTemperature - TemperatureThreshold)");
         }
+        if (ventilationSystem == LOW && (flagHeatIndex == true || flagPPM == true))
+            digitalWrite(relayVentilation, HIGH);
+        else if (ventilationSystem == HIGH && flagHeatIndex == false && flagPPM == false)
+            digitalWrite(relayVentilation, LOW);
         counterDHT11 = 0;
     }
     counterMQ5++;
