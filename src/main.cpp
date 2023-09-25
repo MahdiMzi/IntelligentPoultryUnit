@@ -5,8 +5,8 @@
 #include <Ticker.h>
 #include <DHT.h>
 
-#define MaximumTemperature 30.0
-#define MinimumTemperature 25.0
+#define DefaultMaximumTemperature 28.0
+#define DefaultMinimumTemperature 23.0
 #define TemperatureThreshold 2.0
 #define BAUD_RATE 9600
 String my_username = "admin", my_pass = "admin";
@@ -195,14 +195,20 @@ const String url_time_elapsed = "/time_elapsed",
              url_light_status = "/light_status",
              url_watering_time = "/watering_time",
              url_feeder_movement = "/feeder_movement",
-             url_pir = "/alarm_status";
+             url_pir = "/alarm_status",
+             url_dist = "/dist",
+             url_maxHeat = "/maxHeat",
+             url_minHeat = "/minHeat";
 
 const String check_url1 = "url1",
              check_url2 = "url2",
              check_url3 = "url3",
              check_url4 = "url4",
              check_url5 = "url5",
-             check_url6 = "url6";
+             check_url6 = "url6",
+             check_url_maxHeatIdx = "url7",
+             check_url_minHeatIdx = "url8",
+             check_url_maxDistance = "url9";
 WebServer server(80);
 void initWebServer();
 String dashboard_html();
@@ -216,6 +222,9 @@ void handleLightStatus();
 void handleWateringTime();
 void handleFeederMovement();
 void handlePir();
+void handleMaxHeat();
+void handleMinHeat();
+void handleDist();
 void handleCheck();
 void handleReset();
 void handleError();
@@ -258,8 +267,8 @@ void calculateDistance();
 #define magic_idx 0
 #define currentState_idx 1
 #define eeprom_data_idx 2
-#define username_idx 25
-#define password_idx 75
+#define username_idx 50
+#define password_idx 100
 #define pair 0x13
 #define notPair 0x12
 byte currentState = notPair;
@@ -271,6 +280,9 @@ struct eeprom_data
     int OFW = 0;        // timer on/off Water
     int OFR = 0;        // timer on/off Reil
     byte PIR = notPair; // on/off PIR Motion
+    float maximumTemperature = 28.0;
+    float minimumTemperature = 23.0;
+    int distance_cm = -1;
 } e_data;
 void initEEPROM();
 void resetFactory();
@@ -314,7 +326,6 @@ void setup()
     Serial.begin(BAUD_RATE);
     Serial.println();
     initEEPROM();
-    // resetFactory();
     initAP();
     initWebServer();
     if (currentState == pair)
@@ -398,6 +409,9 @@ void initWebServer()
     server.on(url_watering_time, handleWateringTime);
     server.on(url_feeder_movement, handleFeederMovement);
     server.on(url_pir, handlePir);
+    server.on(url_maxHeat, handleMaxHeat);
+    server.on(url_minHeat, handleMinHeat);
+    server.on(url_dist, handleDist);
     server.on("/reset", handleReset);
     server.on("/error", handleError);
     server.onNotFound(handleNotFound);
@@ -412,6 +426,9 @@ String dashboard_html()
     html += "<h2>Light Status (On/Off):</h2><p>" + String(e_data.OFLED) + "s <a href=\"" + url_light_status + "\">Change Status</a></p>";
     html += "<h2>Watering Time:</h2><p>" + String(e_data.OFW) + "s <a href=\"" + url_watering_time + "\">Change Status</a></p>";
     html += "<h2>Feeder Movement Time:</h2><p>" + String(e_data.OFR) + "s <a href=\"" + url_feeder_movement + "\">Change Status</a></p>";
+    html += "<h2>Maximum Temperature:</h2><p>" + String(e_data.maximumTemperature) + "°C <a href=\"" + url_maxHeat + "\">Change Status</a></p>";
+    html += "<h2>Minimum Temperature:</h2><p>" + String(e_data.minimumTemperature) + "°C <a href=\"" + url_minHeat + "\">Change Status</a></p>";
+    html += "<h2>Distance to the end of the warehouse (cm):</h2><p>" + String(e_data.distance_cm) + "cm <a href=\"" + url_dist + "\">Change Status</a></p>";
     String OnOff = "Off";
     if (e_data.PIR == pair)
     {
@@ -420,7 +437,8 @@ String dashboard_html()
     html += "<h2>Alarm Status:</h2><p>" + OnOff + " <a href=\"" + url_pir + "\">Change Status</a></p>";
     html += "<h2>Temperature and Humidity:</h2><p>Temperature: " + String(temperature) + " °C<br>Humidity: " + String(humidity) + "%<br>Heat index: " + String(heatIndex) + " °C</p>";
     html += "<h2>LPG ppm:</h2><p>" + String(LPG_ppm) + " PPM</p>";
-    html += "<h2>Food Container Level:</h2><p>" + String(ultrasonicSensor_distance) + "cm</p><br><br><a href=\"reset\">Reset Factory</a></body></html>";
+    float percent = 100.0 - (ultrasonicSensor_distance * 100.0 / e_data.distance_cm);
+    html += "<h2>Food Container Level:</h2><p>" + String(percent) + "%</p><br><br><a href=\"reset\">Reset Factory</a></body></html>";
     return html;
 }
 String timer_form_html(const String &check_url)
@@ -429,7 +447,7 @@ String timer_form_html(const String &check_url)
     html += "<h1>Enter the time you need in seconds</h1>";
     html += "<form id=\"timerForm\">";
     html += "<label for=\"number\">Timer:</label>";
-    html += "<input type=\"number\" id=\"number\" name=\"number\" required><br><br>";
+    html += "<input type=\"number\" step=\"0.01\" id=\"number\" name=\"number\" required><br><br>";
     html += "<input type=\"submit\" value=\"Submit\">";
     html += "</form><script>const timerForm = document.getElementById('timerForm');";
     html += "timerForm.addEventListener('submit', function (event) {";
@@ -548,6 +566,39 @@ void handlePir()
     if (currentState == pair)
     {
         server.send(200, "text/html", pir_form_html);
+    }
+    else if (currentState == notPair)
+    {
+        server.send(404, "text/plain", "Error 404 - Not Found!");
+    }
+}
+void handleMaxHeat()
+{
+    if (currentState == pair)
+    {
+        server.send(200, "text/html", timer_form_html(check_url_maxHeatIdx));
+    }
+    else if (currentState == notPair)
+    {
+        server.send(404, "text/plain", "Error 404 - Not Found!");
+    }
+}
+void handleMinHeat()
+{
+    if (currentState == pair)
+    {
+        server.send(200, "text/html", timer_form_html(check_url_minHeatIdx));
+    }
+    else if (currentState == notPair)
+    {
+        server.send(404, "text/plain", "Error 404 - Not Found!");
+    }
+}
+void handleDist()
+{
+    if (currentState == pair)
+    {
+        server.send(200, "text/html", timer_form_html(check_url_maxDistance));
     }
     else if (currentState == notPair)
     {
@@ -693,6 +744,30 @@ void handleCheck()
             return;
         }
     }
+    else if (key == check_url_maxHeatIdx && temp_number != "")
+    {
+        e_data.maximumTemperature = temp_number.toFloat();
+        EEPROM.put(eeprom_data_idx, e_data);
+        EEPROM.commit();
+        server.send(200);
+        return;
+    }
+    else if (key == check_url_minHeatIdx && temp_number != "")
+    {
+        e_data.minimumTemperature = temp_number.toFloat();
+        EEPROM.put(eeprom_data_idx, e_data);
+        EEPROM.commit();
+        server.send(200);
+        return;
+    }
+    else if (key == check_url_maxDistance && temp_number != "")
+    {
+        e_data.distance_cm = temp_number.toInt();
+        EEPROM.put(eeprom_data_idx, e_data);
+        EEPROM.commit();
+        server.send(200);
+        return;
+    }
     server.send(401);
 }
 void handleReset()
@@ -743,6 +818,7 @@ float get_mVolt(byte AnalogPin)
      */
     int ADC_Value = analogRead(AnalogPin);
     delay(1);
+    // Serial.println(ADC_Value);
     float mVolt = ADC_Value * (Referance_V / 4096.0);
     return mVolt;
 }
@@ -822,6 +898,9 @@ void resetFactory()
     e_data.OFW = 0;
     e_data.OFR = 0;
     e_data.PIR = notPair;
+    e_data.distance_cm = -1;
+    e_data.maximumTemperature = DefaultMaximumTemperature;
+    e_data.minimumTemperature = DefaultMinimumTemperature;
     EEPROM.put(eeprom_data_idx, e_data);
     EEPROM.commit();
     ESP.restart();
@@ -919,7 +998,7 @@ void timerHandler()
     // {
     mVolt += get_mVolt(MQ5Sensor_A0_pin);
     // }
-    if (counterMQ5 >= samplingRate_thershold - 1)
+    if (counterMQ5 > samplingRate_thershold)
     {
         mVolt = mVolt / 500.0; /* Get the volatage in mV for 500 Samples */
         float Rs = calculateRS(mVolt);
@@ -947,25 +1026,25 @@ void timerHandler()
 
         byte coolingSystemLED = digitalRead(relayCoolingSystemLED),
              heatingSystemLED = digitalRead(relayHeatingSystemLED);
-        if (heatIndex >= MaximumTemperature && coolingSystemLED != HIGH)
+        if (heatIndex >= e_data.maximumTemperature && coolingSystemLED != HIGH)
         {
             digitalWrite(relayCoolingSystemLED, !coolingSystemLED);
             flagHeatIndex = true;
             Serial.println("if (heatIndex >= MaximumTemperature && coolingSystemLED != HIGH)");
         }
-        else if (coolingSystemLED == HIGH && heatIndex <= MaximumTemperature - TemperatureThreshold)
+        else if (coolingSystemLED == HIGH && heatIndex <= e_data.maximumTemperature - TemperatureThreshold)
         {
             digitalWrite(relayCoolingSystemLED, !coolingSystemLED);
             flagHeatIndex = false;
             Serial.println("else if (coolingSystemLED == HIGH && heatIndex <= MaximumTemperature - TemperatureThreshold)");
         }
-        if (heatIndex <= MinimumTemperature && heatingSystemLED != HIGH)
+        if (heatIndex <= e_data.minimumTemperature && heatingSystemLED != HIGH)
         {
             digitalWrite(relayHeatingSystemLED, !heatingSystemLED);
             flagHeatIndex = true;
             Serial.println("if (heatIndex <= MinimumTemperature && heatingSystemLED != HIGH)");
         }
-        else if (heatingSystemLED == HIGH && heatIndex >= MinimumTemperature + TemperatureThreshold)
+        else if (heatingSystemLED == HIGH && heatIndex >= e_data.minimumTemperature + TemperatureThreshold)
         {
             digitalWrite(relayHeatingSystemLED, !heatingSystemLED);
             flagHeatIndex = false;
